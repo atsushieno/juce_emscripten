@@ -42,7 +42,7 @@ public:
         int x, y;
         int which;
         bool isShiftDown, isCtrlDown, isAltDown;
-        int wheelDelta;
+        int wheelDeltaX, wheelDeltaY;
     };
 
     struct KeyboardEvent : public EmscriptenEventMessage
@@ -85,10 +85,10 @@ private:
 std::unique_ptr<MainThreadEventProxy> MainThreadEventProxy::globalInstance;
 
 extern "C" void juce_mouseCallback(const char* type, int x, int y, int which,
-    int isShiftDown, int isCtrlDown, int isAltDown, int wheelDelta)
+    int isShiftDown, int isCtrlDown, int isAltDown, int deltaX, int deltaY)
 {
     // DBG(type << " " << x << " " << y << " " << which
-    //          << " " << isShiftDown << " " << wheelDelta);
+    //          << " " << isShiftDown << " " << deltaX << " " << deltaY);
     auto* e = new MainThreadEventProxy::MouseEvent();
     e->type = String(type);
     e->x = x;
@@ -97,7 +97,8 @@ extern "C" void juce_mouseCallback(const char* type, int x, int y, int which,
     e->isShiftDown = isShiftDown;
     e->isCtrlDown = isCtrlDown;
     e->isAltDown = isAltDown;
-    e->wheelDelta = wheelDelta;
+    e->wheelDeltaX = deltaX;
+    e->wheelDeltaY = deltaY;
     MainThreadEventProxy::getInstance().postMessage(e);
 }
 
@@ -155,34 +156,34 @@ EM_JS(void, attachEventCallbackToWindow, (),
 {
     if (window.juce_mouseCallback) return;
 
-    // event name, x, y, which button, shift, ctrl, alt, wheel delta
+    // event name, x, y, which button, shift, ctrl, alt, wheel delta x, wheel delta y
     window.juce_mouseCallback = Module.cwrap(
         'juce_mouseCallback', 'void', ['string', 'number', 'number', 'number',
-        'number', 'number', 'number', 'number']);
+        'number', 'number', 'number', 'number', 'number']);
     
     window.onmousedown  = function(e) {
         window.juce_mouseCallback('down' ,
-            e.pageX, e.pageY, e.button, e.shiftKey, e.ctrlKey, e.altKey, 0);
+            e.pageX, e.pageY, e.button, e.shiftKey, e.ctrlKey, e.altKey, 0, 0);
     };
     window.onmouseup    = function(e) { 
         window.juce_mouseCallback('up'   ,
-            e.pageX, e.pageY, e.button, e.shiftKey, e.ctrlKey, e.altKey, 0);
+            e.pageX, e.pageY, e.button, e.shiftKey, e.ctrlKey, e.altKey, 0, 0);
     };
-    window.onmousewheel = function(e) { 
+    window.onwheel = function(e) { 
         window.juce_mouseCallback('wheel',
-            e.pageX, e.pageY, e.button, e.shiftKey, e.ctrlKey, e.altKey, e.wheelDelta);
+            e.pageX, e.pageY, e.button, e.shiftKey, e.ctrlKey, e.altKey, e.deltaX, e.deltaY);
     };
     window.onmouseenter = function(e) { 
         window.juce_mouseCallback('enter',
-            e.pageX, e.pageY, e.button, e.shiftKey, e.ctrlKey, e.altKey, 0);
+            e.pageX, e.pageY, e.button, e.shiftKey, e.ctrlKey, e.altKey, 0, 0);
     };
     window.onmouseleave = function(e) { 
         window.juce_mouseCallback('leave',
-            e.pageX, e.pageY, e.button, e.shiftKey, e.ctrlKey, e.altKey, 0);
+            e.pageX, e.pageY, e.button, e.shiftKey, e.ctrlKey, e.altKey, 0, 0);
     };
     window.onmousemove  = function(e) { 
         window.juce_mouseCallback('move' ,
-            e.pageX, e.pageY, e.button, e.shiftKey, e.ctrlKey, e.altKey, 0);
+            e.pageX, e.pageY, e.button, e.shiftKey, e.ctrlKey, e.altKey, 0, 0);
     };
 
     // window.onmouseout   = function(e) { 
@@ -681,15 +682,15 @@ void MainThreadEventProxy::handleMouseEvent (const MouseEvent& e)
         Point<float> pos = peer->globalToLocal(posGlobal.toFloat());
         if (isDownEvent && ! isPosInPeerBounds) continue;
 
-        if (e.wheelDelta == 0)
+        if (e.wheelDeltaX == 0 && e.wheelDeltaY == 0)
         {
             peer->handleMouseEvent(MouseInputSource::InputSourceType::mouse,
                 pos, mods, MouseInputSource::invalidPressure, 0.0f, fakeMouseEventTime);
         } else
         {
             MouseWheelDetails wheelInfo;
-            wheelInfo.deltaX = 0.0f;
-            wheelInfo.deltaY = e.wheelDelta / 480.0f;
+            wheelInfo.deltaX = e.wheelDeltaX / 480.0f; // really?
+            wheelInfo.deltaY = e.wheelDeltaY / 480.0f;
             wheelInfo.isReversed = false;
             wheelInfo.isSmooth = false;
             wheelInfo.isInertial = false;
