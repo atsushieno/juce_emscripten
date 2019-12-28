@@ -50,6 +50,7 @@ public:
         String type;
         int keyCode;
         String key;
+        bool isComposing;
     };
 
     static MainThreadEventProxy& getInstance()
@@ -78,6 +79,7 @@ private:
 
     void handleMouseEvent (const MouseEvent& e);
     void handleKeyboardEvent (const KeyboardEvent& e);
+    void handleInputEvent (const KeyboardEvent& e);
 
     static std::unique_ptr<MainThreadEventProxy> globalInstance;
 };
@@ -101,13 +103,14 @@ extern "C" void juce_mouseCallback(const char* type, int x, int y, int which,
     MainThreadEventProxy::getInstance().postMessage(e);
 }
 
-extern "C" void juce_keyboardCallback(const char* type, int keyCode, const char * key)
+extern "C" void juce_keyboardCallback(const char* type, int keyCode, const char * key, bool isComposing)
 {
-    // DBG("key " << type << " " << keyCode << " " << key);
+    // DBG("key " << type << " " << keyCode << " " << key << " " isComposing);
     auto* e = new MainThreadEventProxy::KeyboardEvent();
     e->type = String(type);
     e->keyCode = keyCode;
     e->key = String(key);
+    e->isComposing = isComposing;
     MainThreadEventProxy::getInstance().postMessage(e);
 }
 
@@ -197,10 +200,13 @@ EM_JS(void, attachEventCallbackToWindow, (),
     window.addEventListener('keydown', function(e) {
         if (e.keyCode === 32)
             e.preventDefault();
-        window.juce_keyboardCallback ('down', e.which || e.keyCode, e.key);
+        window.juce_keyboardCallback ('down', e.which || e.keyCode, e.key, e.isComposing);
     });
     window.addEventListener('keyup', function(e) {
-        window.juce_keyboardCallback ('up', e.which || e.keyCode, e.key);
+        window.juce_keyboardCallback ('up', e.which || e.keyCode, e.key, e.isComposing);
+    });
+    window.addEventListener('input', function(e) {
+        window.juce_keyboardCallback ('input', e.which || e.keyCode, e.data, e.isComposing);
     });
 
     window.juce_clipboard = "";
@@ -243,6 +249,8 @@ class EmscriptenComponentPeer : public ComponentPeer,
             emscripten_sync_run_in_main_runtime_thread(EM_FUNC_SIG_V,
                 attachEventCallbackToWindow);
 
+            // FIXME: we need something additional that can accept 'input' events.
+            // HTML <input type='text' /> can. Plain <canvas/> cannot.
             MAIN_THREAD_EM_ASM_INT({
                 var canvas = document.createElement('canvas');
                 canvas.id  = UTF8ToString($0);
@@ -702,8 +710,31 @@ void MainThreadEventProxy::handleMouseEvent (const MouseEvent& e)
     fakeMouseEventTime ++;
 }
 
+void MainThreadEventProxy::handleInputEvent (const KeyboardEvent& e)
+{
+    jassertfalse;
+    
+    for (int i = emComponentPeerList.size() - 1; i >= 0; i --)
+    {
+        EmscriptenComponentPeer* peer = emComponentPeerList[i];
+
+        if (! peer->isVisible()) continue;
+        if (! peer->isFocused()) continue;
+
+        if (auto* target = peer->findCurrentTextInputTarget())
+            target->insertTextAtCaret (String());
+    }
+}
+
 void MainThreadEventProxy::handleKeyboardEvent (const KeyboardEvent& e)
 {
+    if (e.type == "input") {
+        handleInputEvent (e);
+        return;
+    }
+    else if (e.isComposing)
+        return;
+
     bool isChar = e.key.length() == 1;
     bool isDown = e.type == "down";
     juce_wchar keyChar = isChar ? (juce_wchar)e.key[0] : 0;
@@ -744,6 +775,7 @@ void MainThreadEventProxy::handleKeyboardEvent (const KeyboardEvent& e)
             peer->handleKeyPress(KeyPress(keyCode, mods, keyChar));
     }
 }
+
 
 //==============================================================================
 ComponentPeer* Component::createNewPeer (int styleFlags, void*)
