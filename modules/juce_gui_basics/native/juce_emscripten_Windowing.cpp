@@ -249,8 +249,6 @@ class EmscriptenComponentPeer : public ComponentPeer,
             emscripten_sync_run_in_main_runtime_thread(EM_FUNC_SIG_V,
                 attachEventCallbackToWindow);
 
-            // FIXME: we need something additional that can accept 'input' events.
-            // HTML <input type='text' /> can. Plain <canvas/> cannot.
             MAIN_THREAD_EM_ASM_INT({
                 var canvas = document.createElement('canvas');
                 canvas.id  = UTF8ToString($0);
@@ -519,7 +517,18 @@ class EmscriptenComponentPeer : public ComponentPeer,
 
         virtual void textInputRequired(Point< int > position, TextInputTarget &) override
         {
-            DBG("textInputRequired");
+            MAIN_THREAD_EM_ASM({
+                var canvas = document.getElementById(UTF8ToString($0));
+                canvas.setAttribute('contenteditable', 'true');
+            }, id.toRawUTF8());
+        }
+
+        virtual void dismissPendingTextInput() override
+        {
+            MAIN_THREAD_EM_ASM({
+                var canvas = document.getElementById(UTF8ToString($0));
+                canvas.setAttribute('contenteditable', 'false');
+            }, id.toRawUTF8());
         }
 
         virtual void repaint (const Rectangle<int>& area) override
